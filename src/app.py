@@ -18,6 +18,23 @@ from pathlib import Path
 from datetime import datetime
 import anthropic
 
+# ─── 配置文件读写 ─────────────────────────────────────────────────
+CONFIG_PATH = Path.home() / ".weekly-report" / "config.json"
+
+def load_local_config() -> dict:
+    try:
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def save_local_config(data: dict):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    current = load_local_config()
+    current.update(data)
+    CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+
 # ─── 页面配置 ────────────────────────────────────────────────────
 st.set_page_config(
     page_title="经营分析智能体",
@@ -142,10 +159,8 @@ def build_data_summary(data: dict, sheets: list, target_week: str) -> str:
 
 
 # ─── AI 调用 ─────────────────────────────────────────────────────
-def generate_report_with_ai(data_summary: str, target_week: str, api_key: str) -> str:
+def generate_report_with_ai(data_summary: str, target_week: str, api_key: str, base_url: str = "", model: str = "claude-sonnet-4-6") -> str:
     """调用 Claude API 生成 HTML 报告"""
-    base_url = os.environ.get("OPENROUTER_BASE_URL", "https://semir.onerouter.com/api")
-    model    = os.environ.get("WEEKLY_REPORT_MODEL", "claude-sonnet-4-6")
 
     client = anthropic.Anthropic(
         api_key=api_key,
@@ -239,8 +254,44 @@ def generate_report_with_ai(data_summary: str, target_week: str, api_key: str) -
 
 # ─── 主界面 ───────────────────────────────────────────────────────
 def main():
-    # 从环境变量读取 API Key（部署时设置）
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    # ─── 侧边栏配置面板 ─────────────────────────────────────────────
+    with st.sidebar:
+        st.markdown("## ⚙️ 模型配置")
+
+        cfg = load_local_config()
+
+        # 优先用环境变量，否则用配置文件
+        default_key   = os.environ.get("ANTHROPIC_API_KEY", "") or cfg.get("apiKey", "")
+        default_url   = os.environ.get("OPENROUTER_BASE_URL", "") or cfg.get("baseUrl", "https://semir.onerouter.com/api")
+        default_model = os.environ.get("WEEKLY_REPORT_MODEL", "") or cfg.get("model", "claude-sonnet-4-6")
+
+        input_key   = st.text_input("API Key", value=default_key, type="password", placeholder="sk-...")
+        input_url   = st.text_input("Base URL", value=default_url, placeholder="https://...")
+        model_options = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-haiku-3-5", "gpt-4o", "gpt-4o-mini"]
+        input_model = st.selectbox(
+            "模型",
+            options=model_options,
+            index=model_options.index(default_model) if default_model in model_options else 0
+        )
+
+        if st.button("💾 保存配置", use_container_width=True):
+            save_local_config({"apiKey": input_key, "baseUrl": input_url, "model": input_model})
+            st.success("✅ 已保存")
+            st.rerun()
+
+        # 用当前输入值（不一定已保存）作为本次运行的 key
+        api_key    = input_key
+        base_url   = input_url
+        model_name = input_model
+
+        st.markdown("---")
+        st.markdown("**使用说明**")
+        st.markdown("""
+1. 填入 API Key 并点击「保存配置」
+2. 上传 Excel 数据文件
+3. 设置目标周数
+4. 点击生成报告
+""")
 
     # 标题
     st.markdown("""
@@ -283,7 +334,7 @@ def main():
             st.error("⚠️ 请先上传 Excel 数据文件")
             return
         if not api_key:
-            st.error("⚠️ 未配置 API Key，请联系管理员")
+            st.warning("⚠️ 请先在左侧边栏填入 API Key，然后点击「保存配置」")
             return
 
         try:
@@ -295,7 +346,7 @@ def main():
             st.info(f"📋 检测到 {len(sheets)} 周数据：{', '.join(sheets)}")
 
             # 生成报告
-            html_report = generate_report_with_ai(data_summary, target_week, api_key)
+            html_report = generate_report_with_ai(data_summary, target_week, api_key, base_url, model_name)
 
             if not html_report.strip().startswith("<!DOCTYPE") and not html_report.strip().startswith("<html"):
                 st.error("报告生成格式异常，请重试")
@@ -308,7 +359,7 @@ def main():
             st.session_state["report_week"] = target_week
 
         except anthropic.AuthenticationError:
-            st.error("❌ API Key 无效，请联系管理员")
+            st.error("❌ API Key 无效，请在左侧边栏重新填写正确的 API Key")
         except Exception as e:
             st.error(f"❌ 生成失败：{str(e)}")
             raise

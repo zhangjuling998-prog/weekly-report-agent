@@ -1,0 +1,12 @@
+node_modules/
+electron-app/dist/
+electron-app/python-dist/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+Thumbs.db
+*.log
+~/.weekly-report/
+dist/

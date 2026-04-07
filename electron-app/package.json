@@ -1,0 +1,16 @@
+{
+  "name": "weekly-report-agent",
+  "version": "1.0.0",
+  "description": "经营分析智能体 — 周报生成器",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac dmg --config build.yml",
+    "build:win": "electron-builder --win nsis --x64 --config build.yml"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "29.4.6",
+    "electron-builder": "^24.0.0"
+  }
+}

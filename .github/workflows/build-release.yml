@@ -1,0 +1,213 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  # macOS arm64 DMG
+  # ────────────────────────────────────────────────────────────────
+  build-mac-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Install npm deps
+        run: cd electron-app && npm ci
+
+      - name: Download & prepare Python arm64
+        run: |
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260310"
+          mkdir -p electron-app/python-dist/bundled
+
+          curl -L -o /tmp/py.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-aarch64-apple-darwin-install_only.tar.gz"
+          tar -xzf /tmp/py.tar.gz -C electron-app/python-dist/bundled --strip-components=1
+
+          echo "📦 Installing Python deps..."
+          electron-app/python-dist/bundled/bin/pip3 install \
+            streamlit anthropic pandas openpyxl numpy --quiet
+
+          echo "✅ $(du -sh electron-app/python-dist/bundled)"
+
+      - name: Build DMG (arm64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          cd electron-app
+          npx electron-builder --mac dmg --arm64 --config build.yml --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64-dist
+          path: electron-app/dist/*.dmg
+          retention-days: 3
+
+  # ────────────────────────────────────────────────────────────────
+  # macOS x64 DMG
+  # ────────────────────────────────────────────────────────────────
+  build-mac-x64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Install npm deps
+        run: cd electron-app && npm ci
+
+      - name: Download & prepare Python x64
+        run: |
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260310"
+          mkdir -p electron-app/python-dist/bundled
+
+          curl -L -o /tmp/py.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-apple-darwin-install_only.tar.gz"
+          tar -xzf /tmp/py.tar.gz -C electron-app/python-dist/bundled --strip-components=1
+
+          echo "📦 Installing Python deps..."
+          electron-app/python-dist/bundled/bin/pip3 install \
+            streamlit anthropic pandas openpyxl numpy --quiet
+
+      - name: Build DMG (x64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          cd electron-app
+          npx electron-builder --mac dmg --x64 --config build.yml --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64-dist
+          path: electron-app/dist/*.dmg
+          retention-days: 3
+
+  # ────────────────────────────────────────────────────────────────
+  # Windows x64 NSIS
+  # ────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Install npm deps
+        run: cd electron-app && npm ci
+
+      - name: Download & prepare Python win-x64
+        shell: bash
+        run: |
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260310"
+          mkdir -p electron-app/python-dist/bundled
+
+          curl -L -o /tmp/py.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-pc-windows-msvc-install_only.tar.gz"
+          tar -xzf /tmp/py.tar.gz -C electron-app/python-dist/bundled --strip-components=1
+
+          echo "📦 Installing Python deps..."
+          "electron-app/python-dist/bundled/python.exe" -m pip install \
+            streamlit anthropic pandas openpyxl numpy --quiet
+
+          ls "electron-app/python-dist/bundled/python.exe"
+          echo "✅ Done"
+
+      - name: Smoke-test bundled python.exe
+        shell: cmd
+        run: |
+          electron-app\python-dist\bundled\python.exe --version
+          if %errorlevel% neq 0 exit /b %errorlevel%
+          echo PASS
+
+      - name: Build Windows NSIS
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          cd electron-app
+          npx electron-builder --win nsis --x64 --config build.yml --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-dist
+          path: electron-app/dist/*.exe
+          retention-days: 3
+
+  # ────────────────────────────────────────────────────────────────
+  # Release (tag push only)
+  # ────────────────────────────────────────────────────────────────
+  release:
+    needs: [build-mac-arm64, build-mac-x64, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-arm64-dist
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-x64-dist
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-dist
+          path: dist/
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "经营分析智能体 ${{ github.ref_name }}"
+          body: |
+            ## 📦 下载安装包
+
+            | 平台 | 文件 | 说明 |
+            |------|------|------|
+            | macOS Apple Silicon (M1-M4) | `*-arm64.dmg` | 推荐 |
+            | macOS Intel | `*-x64.dmg` | Intel Mac |
+            | Windows 10/11 | `*Setup*.exe` | x64 |
+
+            ## ✅ 开箱即用
+            - **无需安装** Python / Node.js / pip / npm / VC++ 运行时
+            - 内置 CPython 3.12 完整版 + streamlit / anthropic / pandas / openpyxl / numpy
+
+            ## 🚀 使用步骤
+            1. 下载并安装对应平台安装包
+            2. 首次启动弹出配置界面 → 填入 API Key → 保存
+            3. 上传 `产品周同比数据.xlsx` → 填写目标周 → 生成报告
+
+            ## 🔧 macOS 未签名提示
+            若提示「已损坏，无法打开」，在终端执行：
+            ```bash
+            xattr -cr "/Applications/经营分析智能体.app"
+            ```
+
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: false

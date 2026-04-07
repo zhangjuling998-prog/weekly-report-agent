@@ -1,0 +1,40 @@
+appId: com.weeklyreport.agent
+productName: 经营分析智能体
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+  buildResources: assets
+
+extraResources:
+  # Python 运行时（CI 在打包前统一放到 python-dist/bundled/）
+  - from: "python-dist/bundled/"
+    to: python
+    filter:
+      - "**/*"
+  # Streamlit 应用源码
+  - from: "../src/"
+    to: app
+    filter:
+      - "**/*.py"
+      - "requirements.txt"
+
+mac:
+  icon: assets/icon.icns
+  target:
+    - dmg
+
+win:
+  icon: assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+dmg:
+  title: 经营分析智能体
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true

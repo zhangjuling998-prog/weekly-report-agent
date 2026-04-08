@@ -12,8 +12,8 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
+from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 import anthropic
@@ -87,17 +87,14 @@ html, body, [class*="css"] {
 # ─── Excel 读取 ───────────────────────────────────────────────────
 def read_excel_data(uploaded_file) -> dict:
     """读取上传的 Excel，返回结构化数据字典"""
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+    excel_bytes = uploaded_file.getvalue()
+    data = {}
 
-    try:
-        xl = pd.ExcelFile(tmp_path)
+    with pd.ExcelFile(BytesIO(excel_bytes)) as xl:
         sheets = xl.sheet_names
-        data = {}
 
         for sheet in sheets:
-            df = pd.read_excel(tmp_path, sheet_name=sheet, header=None)
+            df = pd.read_excel(xl, sheet_name=sheet, header=None)
             # row 0: 标题行, row 2: 列名, row 3+: 数据
             if len(df) < 4:
                 continue
@@ -131,9 +128,7 @@ def read_excel_data(uploaded_file) -> dict:
 
             data[sheet] = rows
 
-        return data, sheets
-    finally:
-        os.unlink(tmp_path)
+    return data, sheets
 
 
 def build_data_summary(data: dict, sheets: list, target_week: str) -> str:
